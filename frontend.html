@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste - Tabela Atendentes</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        #pergunta {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        #resposta {
+            margin-top: 20px;
+            padding: 15px;
+            background: #eaf7fd;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        .error {
+            color: #e74c3c;
+        }
+        .detalhes {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Teste - Tabela Atendentes</h1>
+        <input type="text" id="pergunta" placeholder="Ex: Quantos atendentes ativos existem?">
+        <button onclick="enviarPergunta()">Perguntar</button>
+        <div id="resposta"></div>
+    </div>
+
+    <script>
+        async function enviarPergunta() {
+            const pergunta = document.getElementById('pergunta').value.trim();
+            if (!pergunta) return;
+            
+            const respostaDiv = document.getElementById('resposta');
+            respostaDiv.innerHTML = "Processando...";
+            
+            try {
+                const response = await fetch('http://localhost:5000/perguntar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pergunta })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.erro || "Erro desconhecido");
+                }
+                
+                // Formata a resposta de forma mais amigável
+                let html = `<div class="resposta"><strong>Pergunta:</strong> ${data.pergunta}</div>`;
+                html += `<div class="resposta"><strong>Resposta:</strong> ${data.resposta}</div>`;
+                html += `<div class="detalhes"><strong>Consulta SQL:</strong> ${data.sql}</div>`;
+                html += `<div class="detalhes"><strong>Total:</strong> ${data.total_resultados} registros</div>`;
+                
+                respostaDiv.innerHTML = html;
+                
+            } catch (error) {
+                respostaDiv.innerHTML = `<div class="error">Erro: ${error.message}</div>`;
+            }
+        }
+
+        // Exemplo de atualização no frontend
+        async function carregarTabelas() {
+            const response = await fetch('http://localhost:5000/tabelas');
+            const tabelas = await response.json();
+            
+            const select = document.getElementById('tabelaSelecionada');
+            tabelas.forEach(tabela => {
+                const option = document.createElement('option');
+                option.value = tabela;
+                option.textContent = tabela;
+                select.appendChild(option);
+            });
+        }
+        
+        document.getElementById('pergunta').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') enviarPergunta();
+        });
+    </script>
+</body>
+</html>
