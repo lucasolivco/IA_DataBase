@@ -20,6 +20,17 @@ schema_cache = {}
 schema_last_updated = {}
 cache_lock = threading.Lock()
 
+TABELAS_DISPONIVEIS = {
+    "atendentes": {
+        "nome": "Atendentes",
+        "descricao": "Dados dos colaboradores do setor de atendimento"
+    },
+    "empresas": {
+        "nome": "empresas",
+        "descricao": "Registros fiscais e tributários"
+    }
+}
+
 def get_db_connection():
     """Estabelece conexão com o banco de dados"""
     try:
@@ -75,26 +86,44 @@ def query_huggingface(prompt, tabela='atendentes'):
         schema = get_schema(tabela)
         colunas_str = "\n".join([f"- {col['nome']} ({col['tipo']})" for col in schema[tabela]])
         
+        # Contexto específico para cada tabela
+        contexto = {
+            "atendentes": {
+                "exemplos": [
+                    ("Quantos atendentes ativos existem?", "SELECT COUNT(*) FROM atendentes WHERE ativo = 1"),
+                    ("Liste os nomes em ordem alfabética", "SELECT nome_atendente FROM atendentes ORDER BY nome_atendente ASC")
+                ],
+                "dicas": "Campos relevantes: nome_atendente, data_admissao, ativo"
+            },
+            "empresas": {
+                "exemplos": [
+                    ("Qual o total de débitos pendentes?", "SELECT SUM(valor_debito) AS total_debitos FROM empresas WHERE status_pagamento = 'pendente'"),
+                    ("Mostre os registros do último trimestre", "SELECT * FROM empresas WHERE data_vencimento BETWEEN DATEADD(QUARTER, -1, GETDATE()) AND GETDATE()")
+                ],
+                "dicas": "Campos relevantes: nome_atendente, data_admissao, ativo"
+            }
+        }
+        
+        # Construção dinâmica do prompt
         prompt_otimizado = f"""<|system|>
-Você é um especialista em SQL Server. Converta perguntas em consultas SQL precisas.
+Você é um especialista em SQL Server. Converta perguntas em consultas SQL precisas para a tabela {tabela}.
 
-Tabela disponível: {tabela}
 Colunas disponíveis:
 {colunas_str}
 
 Regras:
-1. Retorne APENAS o código SQL sem marcações
-2. Use apenas SELECT
-3. Seja preciso com nomes de colunas
-4. Não inclua explicações ou texto adicional
-5. Para contagens, use COUNT(*) ou COUNT(coluna) conforme apropriado
+1. Use exclusivamente a tabela {tabela}
+2. Retorne APENAS o código SQL válido
+3. Seja preciso com os nomes das colunas
+4. Formate datas usando funções SQL Server (ex: GETDATE())
+5. Inclua condições WHERE quando relevante
 
-Exemplos:
-Pergunta: "Quantos registros existem?"
-Resposta: SELECT COUNT(*) FROM {tabela}
+Exemplos para {tabela}:
+{'\n'.join([f'Pergunta: "{q}"\nResposta: {r}' for q, r in contexto[tabela]['exemplos']])}
 
-Pergunta: "Liste os nomes"
-Resposta: SELECT nome FROM {tabela}<|end|>
+Dicas:
+{contexto[tabela]['dicas']}
+<|end|>
 <|user|>
 {prompt}<|end|>
 <|assistant|>
@@ -107,7 +136,7 @@ Resposta: SELECT nome FROM {tabela}<|end|>
                 "inputs": prompt_otimizado,
                 "parameters": {
                     "max_new_tokens": 100,
-                    "temperature": 0.1  # Reduz ainda mais a criatividade
+                    "temperature": 0.1
                 }
             },
             timeout=30
@@ -120,14 +149,10 @@ Resposta: SELECT nome FROM {tabela}<|end|>
         if not isinstance(resposta, list):
             raise ValueError("Resposta inesperada da API")
         
-        # Extrai apenas o SQL da resposta
         sql = resposta[0]['generated_text'].strip()
-        
-        # Remove possíveis marcações e texto adicional
         sql = sql.split("<|assistant|>")[-1].strip()
-        sql = sql.split(";")[0].strip()  # Pega apenas a primeira instrução
+        sql = sql.split(";")[0].strip()
         
-        # Validação básica para garantir que é um SQL
         if not sql.lower().startswith(('select', 'with')):
             raise ValueError(f"Resposta não é um SQL válido: {sql}")
             
@@ -155,8 +180,12 @@ def validar_sql(sql, tabela='atendentes'):
     if any(palavra in sql_lower for palavra in palavras_proibidas):
         raise ValueError("Comandos não permitidos detectados")
     
-    # Verifica referência à tabela
-    if f"from {tabela.lower()}" not in sql_lower and f"join {tabela.lower()}" not in sql_lower:
+    # Verifica referência à tabela correta
+    if (
+        f"from {tabela.lower()}" not in sql_lower 
+        and f"join {tabela.lower()}" not in sql_lower
+        and not sql_lower.startswith(('with'))
+    ):
         raise ValueError(f"A consulta deve referenciar a tabela {tabela}")
     
     # Verifica se é uma consulta SELECT
@@ -184,11 +213,9 @@ def formatar_resposta_natural(pergunta, dados, sql):
     """Formata os resultados em linguagem natural"""
     total = len(dados)
     
-    # Casos especiais para contagens
     if "count(*)" in sql.lower():
         return f"Existem {dados[0][list(dados[0].keys())[0]]} registros."
     
-    # Para consultas que retornam nomes ou valores específicos
     if total == 0:
         return "Nenhum resultado encontrado."
     elif total == 1:
@@ -228,7 +255,7 @@ def perguntar():
             "resposta": resposta,
             "sql": sql,
             "total_resultados": len(dados),
-            "dados": dados[:100]  # Limita a 100 registros
+            "dados": dados[:100]
         })
         
     except Exception as e:
@@ -241,16 +268,21 @@ def perguntar():
 def teste_conexao():
     """Endpoint para testar conexão com o banco"""
     try:
-        schema = get_schema('atendentes')
+        schema_atendentes = get_schema('atendentes')
+        schema_fiscal = get_schema('empresas')
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT TOP 1 * FROM atendentes")
-            exemplo = cursor.fetchone()
+            exemplo_atendentes = cursor.fetchone()
+            cursor.execute("SELECT TOP 1 * FROM empresas")
+            exemplo_fiscal = cursor.fetchone()
             
             return jsonify({
                 "status": "Conexão OK",
-                "exemplo": str(exemplo),
-                "schema": schema['atendentes']
+                "schemas": {
+                    "atendentes": schema_atendentes['atendentes'],
+                    "empresas": schema_fiscal['empresas']
+                }
             })
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
@@ -267,6 +299,18 @@ def obter_schema(tabela):
         })
     except Exception as e:
         return jsonify({"erro": str(e)}), 404
+    
+@app.route('/tabelas', methods=['GET'])
+def listar_tabelas():
+    """Lista todas as tabelas disponíveis para consulta"""
+    try:
+        return jsonify({
+            "tabelas": TABELAS_DISPONIVEIS,
+            "suporte": "Utilize o nome da tabela no parâmetro 'tabela' nas requisições POST"
+        })
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
