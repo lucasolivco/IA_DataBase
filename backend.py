@@ -47,85 +47,48 @@ def get_db_connection():
 def get_schema(tabela='atendentes'):
     """Obtém schema com cache"""
     with cache_lock:
-        # Verifica se precisa atualizar o cache
         if (tabela not in schema_cache or 
             (datetime.now() - schema_last_updated.get(tabela, datetime.min)) > timedelta(hours=1)):
-            
             conn = None
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor()
-                
                 cursor.execute("""
                     SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
                     FROM INFORMATION_SCHEMA.COLUMNS 
                     WHERE TABLE_NAME = ?
                     ORDER BY ORDINAL_POSITION
                 """, tabela)
-                
                 schema_cache[tabela] = [
-                    {
-                        "nome": nome,
-                        "tipo": tipo,
-                        "nullable": nullable == 'YES'
-                    } for nome, tipo, nullable in cursor.fetchall()
+                    {"nome": nome, "tipo": tipo, "nullable": (nullable == 'YES')}
+                    for nome, tipo, nullable in cursor.fetchall()
                 ]
                 schema_last_updated[tabela] = datetime.now()
-                
             except Exception as e:
                 raise ValueError(f"Erro ao obter schema: {str(e)}")
             finally:
                 if conn:
                     conn.close()
-        
         return {tabela: schema_cache[tabela]}
 
 def query_huggingface(prompt, tabela='atendentes'):
-    """Consulta o modelo de IA para gerar SQL"""
+    """Consulta o modelo de IA para gerar apenas o SQL, sem repetir a pergunta."""
     try:
         schema = get_schema(tabela)
         colunas_str = "\n".join([f"- {col['nome']} ({col['tipo']})" for col in schema[tabela]])
         
-        # Contexto específico para cada tabela
-        contexto = {
-            "atendentes": {
-                "exemplos": [
-                    ("Quantos atendentes ativos existem?", "SELECT COUNT(*) FROM atendentes WHERE ativo = 1"),
-                    ("Liste os nomes em ordem alfabética", "SELECT nome_atendente FROM atendentes ORDER BY nome_atendente ASC")
-                ],
-                "dicas": "Campos relevantes: nome_atendente, data_admissao, ativo"
-            },
-            "empresas": {
-                "exemplos": [
-                    ("Qual o total de débitos pendentes?", "SELECT SUM(valor_debito) AS total_debitos FROM empresas WHERE status_pagamento = 'pendente'"),
-                    ("Mostre os registros do último trimestre", "SELECT * FROM empresas WHERE data_vencimento BETWEEN DATEADD(QUARTER, -1, GETDATE()) AND GETDATE()")
-                ],
-                "dicas": "Campos relevantes: nome_atendente, data_admissao, ativo"
-            }
-        }
-        
-        # Construção dinâmica do prompt
+        # Novo prompt: instrui a retornar SOMENTE o código SQL válido, sem incluir a pergunta
         prompt_otimizado = f"""<|system|>
-Você é um especialista em SQL Server. Converta perguntas em consultas SQL precisas para a tabela {tabela}.
-
-Colunas disponíveis:
-{colunas_str}
-
-Regras:
-1. Use exclusivamente a tabela {tabela}
-2. Retorne APENAS o código SQL válido
-3. Seja preciso com os nomes das colunas
-4. Formate datas usando funções SQL Server (ex: GETDATE())
-5. Inclua condições WHERE quando relevante
-
-Exemplos para {tabela}:
-{'\n'.join([f'Pergunta: "{q}"\nResposta: {r}' for q, r in contexto[tabela]['exemplos']])}
-
-Dicas:
-{contexto[tabela]['dicas']}
+Você é um especialista em SQL Server. Ao receber uma pergunta, retorne SOMENTE uma consulta SQL válida que responda à pergunta. 
+Não inclua nenhum texto ou repetição da pergunta.
+Sempre use "LIKE" no lugar de "=" se o usuário pedir colunas com valores de string (texto).
 <|end|>
 <|user|>
-{prompt}<|end|>
+Pergunta: {prompt}
+Tabela: {tabela}
+Colunas disponíveis:
+{colunas_str}
+<|end|>
 <|assistant|>
 """
         
@@ -149,9 +112,14 @@ Dicas:
         if not isinstance(resposta, list):
             raise ValueError("Resposta inesperada da API")
         
+        # Processa a resposta: assume que o texto gerado é apenas o SQL
         sql = resposta[0]['generated_text'].strip()
-        sql = sql.split("<|assistant|>")[-1].strip()
-        sql = sql.split(";")[0].strip()
+        # Se houver linhas em branco ou mensagens extras, pega somente a primeira linha que comece com SELECT ou WITH
+        for linha in sql.splitlines():
+            linha = linha.strip()
+            if linha.lower().startswith(('select', 'with')):
+                sql = linha
+                break
         
         if not sql.lower().startswith(('select', 'with')):
             raise ValueError(f"Resposta não é um SQL válido: {sql}")
@@ -172,23 +140,15 @@ def validar_sql(sql, tabela='atendentes'):
     if any(erro in sql_lower for erro in ["erro", "exception", "error"]):
         raise ValueError(sql)
     
-    # Validações de segurança
-    palavras_proibidas = [
-        "insert", "update", "delete", "drop", 
-        "alter", "truncate", "create", "exec"
-    ]
+    palavras_proibidas = ["insert", "update", "delete", "drop", "alter", "truncate", "create", "exec"]
     if any(palavra in sql_lower for palavra in palavras_proibidas):
         raise ValueError("Comandos não permitidos detectados")
     
-    # Verifica referência à tabela correta
-    if (
-        f"from {tabela.lower()}" not in sql_lower 
-        and f"join {tabela.lower()}" not in sql_lower
-        and not sql_lower.startswith(('with'))
-    ):
+    if (f"from {tabela.lower()}" not in sql_lower and 
+        f"join {tabela.lower()}" not in sql_lower and 
+        not sql_lower.startswith(('with'))):
         raise ValueError(f"A consulta deve referenciar a tabela {tabela}")
     
-    # Verifica se é uma consulta SELECT
     if not sql_lower.lstrip().startswith(('select', 'with')):
         raise ValueError("Apenas consultas SELECT são permitidas")
 
@@ -199,10 +159,8 @@ def executar_sql(sql):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(sql)
-        
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    
     except pyodbc.Error as e:
         raise RuntimeError(f"Erro ao executar SQL: {str(e)}")
     finally:
@@ -210,22 +168,26 @@ def executar_sql(sql):
             conn.close()
 
 def formatar_resposta_natural(pergunta, dados, sql):
-    """Formata os resultados em linguagem natural"""
-    total = len(dados)
+    """Formata os resultados em forma de lista, exibindo cada registro como:
     
-    if "count(*)" in sql.lower():
-        return f"Existem {dados[0][list(dados[0].keys())[0]]} registros."
-    
-    if total == 0:
+    nome_da_coluna: "valor"
+    """
+    if not dados:
         return "Nenhum resultado encontrado."
-    elif total == 1:
-        return f"Resultado: {str(dados[0])}"
-    elif total <= 5:
-        itens = "\n".join([str(item) for item in dados])
-        return f"{total} resultados encontrados:\n{itens}"
-    else:
-        primeiros_itens = "\n".join([str(item) for item in dados[:5]])
-        return f"{total} resultados encontrados (mostrando 5 primeiros):\n{primeiros_itens}"
+    
+    linhas_formatadas = []
+    total = len(dados)
+    linhas_formatadas.append(f"Total de registros: {total}")
+    linhas_formatadas.append("")
+    
+    for i, row in enumerate(dados, start=1):
+        linhas_formatadas.append(f"Registro {i}:")
+        for chave, valor in row.items():
+            linhas_formatadas.append(f'{chave}: "{valor}"')
+        linhas_formatadas.append("")  # Linha em branco entre registros
+
+    resultado = f"SQL executado:\n{sql}\n\n" + "\n".join(linhas_formatadas)
+    return resultado
 
 @app.route('/perguntar', methods=['POST'])
 def perguntar():
@@ -247,7 +209,7 @@ def perguntar():
         # 3. Executa
         dados = executar_sql(sql)
         
-        # 4. Formata resposta natural
+        # 4. Formata resposta natural em forma de lista
         resposta = formatar_resposta_natural(pergunta, dados, sql)
         
         return jsonify({
@@ -276,7 +238,6 @@ def teste_conexao():
             exemplo_atendentes = cursor.fetchone()
             cursor.execute("SELECT TOP 1 * FROM empresas")
             exemplo_fiscal = cursor.fetchone()
-            
             return jsonify({
                 "status": "Conexão OK",
                 "schemas": {
@@ -310,7 +271,6 @@ def listar_tabelas():
         })
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
