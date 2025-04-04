@@ -84,6 +84,7 @@ def query_huggingface(prompt, tabela='atendentes'):
 Você é um especialista em SQL Server. Ao receber uma pergunta, retorne SOMENTE uma consulta SQL válida que responda à pergunta.
 Não inclua nenhum texto ou repetição da pergunta.
 Sempre use "LIKE" no lugar de "=" se o usuário pedir colunas com valores de string (texto).
+Normalmente quando o usuário pergunta algo parecido com "mostre os dados da" o que vem a seguir é o nome da empresa, exemplo: "mostre os dados da volseg" o sql vai ser  SELECT * FROM empresas WHERE nome LIKE '%volseg%'
 <|end|>
 <|user|>
 Pergunta: {prompt}
