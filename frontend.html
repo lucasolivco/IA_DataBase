@@ -1,146 +1,185 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IA bd</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
-        }
-        .container {
-            background: #f9f9f9;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #2c3e50;
-            text-align: center;
-        }
-        #pergunta {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            font-size: 16px;
-        }
-        button {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            cursor: pointer;
-            font-size: 16px;
-            border-radius: 4px;
-        }
-        button:hover {
-            background: #2980b9;
-        }
-        #resposta {
-            margin-top: 20px;
-            padding: 15px;
-            background: #eaf7fd;
-            border-radius: 4px;
-            white-space: pre-wrap;
-        }
-        .error {
-            color: #e74c3c;
-        }
-        .detalhes {
-            font-size: 0.9em;
-            color: #666;
-            margin-top: 15px;
-        }
-
-        .controles {
-            display: grid;
-            grid-template-columns: 1fr 2fr 1fr;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        
-        #tabelaSelecionada {
-            padding: 8px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IA Canelinha - Consulta Inteligente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>IA Canellinha</h1>
-        <div class="controles">
-            <select id="tabelaSelecionada">
-                <option value="atendentes">Atendentes</option>
-                <option value="empresas">empresas</option>
-            </select>
-            <input type="text" id="pergunta" placeholder="Ex: Quantos registros pendentes?">
-            <button onclick="enviarPergunta()">Perguntar</button>
-        </div>
-        <div id="resposta"></div>
+  <div class="container">
+    <h1>IA Canelinha <span class="status-badge">Online</span></h1>
+    
+    <div class="input-group">
+      <select id="tabelaSelecionada">
+        <option value="atendentes">Atendentes</option>
+        <option value="empresas">Empresas</option>
+      </select>
+      <input type="text" id="pergunta" placeholder="Ex: Quantos registros estão pendentes?">
+      <button onclick="enviarPergunta()">
+        <span id="button-text">Perguntar</span>
+        <span id="button-loader" class="loading" style="display: none;"></span>
+      </button>
     </div>
     
-
-    <script>
-        async function enviarPergunta() {
-            const pergunta = document.getElementById('pergunta').value.trim();
-            const tabela = document.getElementById('tabelaSelecionada').value;
-            
-            if (!pergunta) return;
-            
-            const respostaDiv = document.getElementById('resposta');
-            respostaDiv.innerHTML = "Processando...";
-            
-            try {
-                const response = await fetch('http://localhost:5000/perguntar', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        pergunta: pergunta,
-                        tabela: tabela
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.erro || "Erro desconhecido");
-                }
-                
-                // Formata a resposta de forma mais amigável
-                let html = `<div class="resposta"><strong>Pergunta:</strong> ${data.pergunta}</div>`;
-                html += `<div class="resposta"><strong>Resposta:</strong> ${data.resposta}</div>`;
-                html += `<div class="detalhes"><strong>Consulta SQL:</strong> ${data.sql}</div>`;
-                html += `<div class="detalhes"><strong>Total:</strong> ${data.total_resultados} registros</div>`;
-                
-                respostaDiv.innerHTML = html;
-                
-            } catch (error) {
-                respostaDiv.innerHTML = `<div class="error">Erro: ${error.message}</div>`;
-            }
-        }
-
-        // Exemplo de atualização no frontend
-        async function carregarTabelas() {
-            const response = await fetch('http://localhost:5000/tabelas');
-            const tabelas = await response.json();
-            
-            const select = document.getElementById('tabelaSelecionada');
-            tabelas.forEach(tabela => {
-                const option = document.createElement('option');
-                option.value = tabela;
-                option.textContent = tabela;
-                select.appendChild(option);
-            });
+    <div id="resposta" style="display: none;"></div>
+  </div>
+  
+  <script>
+    async function enviarPergunta() {
+      const pergunta = document.getElementById('pergunta').value.trim();
+      const tabela = document.getElementById('tabelaSelecionada').value;
+      
+      if (!pergunta) {
+        alert("Por favor, digite sua pergunta");
+        return;
+      }
+      
+      const respostaDiv = document.getElementById('resposta');
+      const buttonText = document.getElementById('button-text');
+      const buttonLoader = document.getElementById('button-loader');
+      
+      // Mostrar estado de carregamento
+      respostaDiv.style.display = 'block';
+      respostaDiv.innerHTML = `<div style="text-align: center; padding: 1rem;">Processando sua pergunta...</div>`;
+      buttonText.style.display = 'none';
+      buttonLoader.style.display = 'block';
+      
+      try {
+        const response = await fetch('http://localhost:5000/perguntar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            pergunta: pergunta,
+            tabela: tabela
+          })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.erro || "Erro ao processar sua pergunta");
         }
         
-        document.getElementById('pergunta').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') enviarPergunta();
+        // Inicia a montagem da resposta HTML
+        let html = `
+          <div class="resposta-section">
+            <span class="resposta-label">Sua pergunta</span>
+            <div class="resposta-content">${data.pergunta}</div>
+          </div>
+          
+          <div class="resposta-section">
+            <span class="resposta-label">Resposta</span>
+            <div class="resposta-content">
+              <div class="total-registros">Total de registros: ${data.total_resultados}</div>
+              <div class="registro-container">
+        `;
+        
+        // Se houver registros, garante que as colunas sejam exibidas na ordem do primeiro registro
+        if (data.dados && data.dados.length > 0) {
+          const keysOrdem = Object.keys(data.dados[0]);
+          data.dados.forEach((registro, index) => {
+            html += `
+              <div class="registro-item">
+                <div class="registro-header">
+                  <span class="registro-numero">${index + 1}</span>
+                  Registro ${index + 1}
+                </div>
+            `;
+            keysOrdem.forEach(chave => {
+              html += `
+                <div class="registro-dado">
+                  <span class="registro-chave">${chave}:</span>
+                  <span class="registro-valor">"${registro[chave]}"</span>
+                </div>
+              `;
+            });
+            html += `</div>`; // Fecha registro-item
+          });
+        } else {
+          html += `<div class="resposta-content">${data.resposta}</div>`;
+        }
+        
+        html += `
+              </div> <!-- fecha registro-container -->
+            </div> <!-- fecha resposta-content -->
+          </div>
+          
+          <div class="resposta-section">
+            <span class="resposta-label">Consulta SQL gerada</span>
+            <div class="sql-code">${data.sql}</div>
+          </div>
+        `;
+        
+        respostaDiv.innerHTML = html;
+        
+      } catch (error) {
+        respostaDiv.innerHTML = `
+          <div class="error">
+            <strong>Ocorreu um erro:</strong> ${error.message}
+            <div style="margin-top: 0.5rem; font-size: 0.9rem;">Tente novamente ou reformule sua pergunta.</div>
+          </div>
+        `;
+      } finally {
+        buttonText.style.display = 'block';
+        buttonLoader.style.display = 'none';
+      }
+    }
+    
+    async function verificarStatusBackend() {
+      const statusBadge = document.querySelector('.status-badge');
+      
+      try {
+        const response = await fetch('http://localhost:5000/tabelas', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000)
         });
-    </script>
+        
+        if (response.ok) {
+          statusBadge.textContent = 'Online';
+          statusBadge.classList.remove('offline');
+          statusBadge.classList.add('online');
+        } else {
+          throw new Error('Backend offline');
+        }
+      } catch (error) {
+        statusBadge.textContent = 'Offline';
+        statusBadge.classList.remove('online');
+        statusBadge.classList.add('offline');
+        statusBadge.title = 'Não foi possível conectar ao servidor\n' + 
+                            'Verifique se o backend está rodando\n' +
+                            `Erro: ${error.message}`;
+      }
+    }
+    
+    // Verificar status imediatamente e a cada 10 segundos
+    verificarStatusBackend();
+    setInterval(verificarStatusBackend, 10000);
+    
+    // Permitir envio com a tecla Enter
+    document.getElementById('pergunta').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') enviarPergunta();
+    });
+    
+    // Placeholder rotativo
+    const placeholders = [
+      "Ex: Quantos registros estão pendentes?",
+      "Ex: Quais atendentes têm mais chamados?",
+      "Ex: Mostre as empresas cadastradas este mês"
+    ];
+    let currentPlaceholder = 0;
+    
+    function rotatePlaceholder() {
+      document.getElementById('pergunta').placeholder = placeholders[currentPlaceholder];
+      currentPlaceholder = (currentPlaceholder + 1) % placeholders.length;
+    }
+    
+    rotatePlaceholder();
+    setInterval(rotatePlaceholder, 3000);
+  </script>
 </body>
 </html>

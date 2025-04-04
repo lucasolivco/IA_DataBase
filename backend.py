@@ -84,7 +84,9 @@ def query_huggingface(prompt, tabela='atendentes'):
 Você é um especialista em SQL Server. Ao receber uma pergunta, retorne SOMENTE uma consulta SQL válida que responda à pergunta.
 Não inclua nenhum texto ou repetição da pergunta.
 Sempre use "LIKE" no lugar de "=" se o usuário pedir colunas com valores de string (texto).
-Normalmente quando o usuário pergunta algo parecido com "mostre os dados da" o que vem a seguir é o nome da empresa, exemplo: "mostre os dados da volseg" o sql vai ser  SELECT * FROM empresas WHERE nome LIKE '%volseg%'
+Normalmente quando o usuário pergunta algo parecido com "mostre os dados da" o que vem a seguir é o nome da empresa, exemplo: "mostre os dados da volseg" o sql vai ser  SELECT * FROM empresas WHERE razao_social LIKE '%volseg%'
+Outros Exemplos: Qual o código da criat? sql: SELECT codigo_empresa FROM empresas WHERE razao_social LIKE '%criat%'
+Qual o status da revidrex? sql: SELECT status FROM empresas WHERE razao_social LIKE '%revidrex%'
 <|end|>
 <|user|>
 Pergunta: {prompt}
@@ -228,28 +230,6 @@ def perguntar():
             "erro": str(e),
             "dica": f"Exemplos válidos: 'Quantos registros em {tabela}?', 'Liste 5 itens de {tabela}'"
         }), 500
-
-@app.route('/teste', methods=['GET'])
-def teste_conexao():
-    """Endpoint para testar conexão com o banco"""
-    try:
-        schema_atendentes = get_schema('atendentes')
-        schema_fiscal = get_schema('empresas')
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT TOP 1 * FROM atendentes")
-            exemplo_atendentes = cursor.fetchone()
-            cursor.execute("SELECT TOP 1 * FROM empresas")
-            exemplo_fiscal = cursor.fetchone()
-            return jsonify({
-                "status": "Conexão OK",
-                "schemas": {
-                    "atendentes": schema_atendentes['atendentes'],
-                    "empresas": schema_fiscal['empresas']
-                }
-            })
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 @app.route('/schema/<tabela>', methods=['GET'])
 def obter_schema(tabela):
