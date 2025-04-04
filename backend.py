@@ -5,10 +5,12 @@ import threading
 from flask_cors import CORS
 import requests
 import os
+import dotenv
 
 # Configurações
 app = Flask(__name__)
 CORS(app)
+dotenv.load_dotenv()  # Carrega variáveis de ambiente do arquivo .env
 
 # Constantes
 HF_API_URL = "https://api-inference.huggingface.co/models/microsoft/phi-3-mini-4k-instruct"
@@ -35,11 +37,11 @@ def get_db_connection():
     """Estabelece conexão com o banco de dados"""
     try:
         return pyodbc.connect(
-            r"DRIVER={ODBC Driver 17 for SQL Server};"
-            r"SERVER=SIEG-002\SQLCANELLA,1433;"
-            r"DATABASE=canellaBD;"
-            r"UID=ia_contabilidade;"
-            r"PWD=CanellaeSantos;"
+            f"DRIVER={os.getenv('DB_DRIVER')};"
+            f"SERVER={os.getenv('DB_SERVER')};"
+            f"DATABASE={os.getenv('DB_NAME')};"
+            f"UID={os.getenv('DB_USER')};"
+            f"PWD={os.getenv('DB_PASSWORD')};"
         )
     except pyodbc.Error as e:
         raise ConnectionError(f"Falha ao conectar ao banco de dados: {str(e)}")
@@ -79,7 +81,7 @@ def query_huggingface(prompt, tabela='atendentes'):
         
         # Novo prompt: instrui a retornar SOMENTE o código SQL válido, sem incluir a pergunta
         prompt_otimizado = f"""<|system|>
-Você é um especialista em SQL Server. Ao receber uma pergunta, retorne SOMENTE uma consulta SQL válida que responda à pergunta. 
+Você é um especialista em SQL Server. Ao receber uma pergunta, retorne SOMENTE uma consulta SQL válida que responda à pergunta.
 Não inclua nenhum texto ou repetição da pergunta.
 Sempre use "LIKE" no lugar de "=" se o usuário pedir colunas com valores de string (texto).
 <|end|>
